@@ -34,15 +34,3 @@ st.sidebar.info("TATI V.26 — Construído com base no teu modelo e no motor hí
 # -----------------------------
 
 if menu == "Upload de Dados":
-    st.header("📥 Upload do CSV")
-
-    uploaded_file = st.file_uploader("Carrega o CSV preparado pelo TATI", type=["csv"])
-
-    if uploaded_file is not None:
-        df = pd.read_csv(uploaded_file)
-        st.success("CSV carregado com sucesso!")
-        st.dataframe(df)
-
-        if st.button("Processar Dados"):
-            st.session_state["df"] = df
-            st.success("Dados prontos para cálculo!")
