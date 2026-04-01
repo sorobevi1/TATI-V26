@@ -1,632 +1,696 @@
 import streamlit as st
 import pandas as pd
-import math
+import numpy as np
+import os
+from math import exp, factorial
 
 # ============================================================
-# TATI V.26 — PAINEL PROFISSIONAL
+#   TATI‑V26 PRO — Trading System Edition (Dark Mode)
+#   Módulo Base: Tema, Layout, Cache, Modo Dev, Painel Testes
 # ============================================================
 
-st.set_page_config(page_title="TATI V.26", layout="wide")
-
-st.title("⚽ TATI V.26 — Painel de Elite")
-st.subheader("Motor xG + Poisson + Valor • Versão Profissional")
-st.markdown("---")
-
-# ============================================================
-# MENU LATERAL (SEPARADORES)
-# ============================================================
-
-menu = st.sidebar.radio(
-    "Navegação",
-    [
-        "Upload de Dados",
-        "Probabilidades",
-        "Fair Odds",
-        "Edge",
-        "Valor Esperado",
-        "Ranking",
-        "Aposta do Dia",
-        "Gestão de Banca"
-    ]
+# ---------------------------
+# CONFIGURAÇÃO DO PAINEL
+# ---------------------------
+st.set_page_config(
+    page_title="TATI‑V26 PRO — Trading System",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
+
+# ---------------------------
+# TEMA DARK MODE TRADINGVIEW
+# ---------------------------
+dark_css = """
+<style>
+body {
+    background-color: #0d0d0d;
+    color: #ffffff;
+}
+[data-testid="stAppViewContainer"] {
+    background-color: #0d0d0d;
+}
+[data-testid="stHeader"] {
+    background-color: #0d0d0d;
+}
+[data-testid="stSidebar"] {
+    background-color: #111111;
+}
+h1, h2, h3, h4, h5, h6 {
+    color: #1e90ff !important;
+}
+.stButton>button {
+    background-color: #1e90ff;
+    color: white;
+    border-radius: 6px;
+    border: none;
+}
+.stButton>button:hover {
+    background-color: #63b3ff;
+}
+</style>
+"""
+st.markdown(dark_css, unsafe_allow_html=True)
+
+# ---------------------------
+# CACHE GLOBAL
+# ---------------------------
+@st.cache_data
+def load_csv(path):
+    return pd.read_csv(path)
+
+@st.cache_data
+def cached_poisson(lmbda, goals):
+    return (lmbda**goals * np.exp(-lmbda)) / np.math.factorial(goals)
+
+# ---------------------------
+# MODO DESENVOLVEDOR (OCULTO)
+# ---------------------------
+if "dev_clicks" not in st.session_state:
+    st.session_state.dev_clicks = 0
+
+def dev_click():
+    st.session_state.dev_clicks += 1
+
+st.title("TATI‑V26 PRO — Trading System")
+st.caption("Dark Mode TradingView • Score Híbrido • Turbo Mode • Cache Ativo")
+
+# 5 cliques no título → ativa modo dev
+st.button(" ", on_click=dev_click)
+
+modo_dev = st.session_state.dev_clicks >= 5
+
+# ---------------------------
+# PAINEL DE TESTES (SÓ NO MODO DEV)
+# ---------------------------
+def painel_testes():
+    st.subheader("🧪 Painel de Testes do Modelo (Modo Desenvolvedor)")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        xg_A = st.number_input("xG da Equipa A", 0.0, 5.0, 1.2, 0.1)
+        forma_A = st.slider("Forma da Equipa A (0–1)", 0.0, 1.0, 0.6)
+        league_factor = st.slider("League Factor", 0.5, 1.5, 1.0)
+
+    with col2:
+        xg_B = st.number_input("xG da Equipa B", 0.0, 5.0, 1.0, 0.1)
+        forma_B = st.slider("Forma da Equipa B (0–1)", 0.0, 1.0, 0.6)
+        odd_1 = st.number_input("Odd 1", 1.01, 10.0, 2.10)
+        odd_x = st.number_input("Odd X", 1.01, 10.0, 3.20)
+        odd_2 = st.number_input("Odd 2", 1.01, 10.0, 3.40)
+
+    st.info("Quando adicionarmos o Módulo do Modelo, este painel vai calcular probabilidades, EV, score híbrido e impacto do Turbo Mode.")
+
+    st.write("⚙️ **Este painel será ativado automaticamente quando o Módulo do Modelo for integrado.**")
+
+if modo_dev:
+    painel_testes()
+
+# ---------------------------
+# ESTRUTURA DAS ABAS (LAYOUT TRADING SYSTEM)
+# ---------------------------
+tabs = st.tabs([
+    "📊 Mercado",
+    "🎯 Sinais",
+    "📝 Registo",
+    "📈 Análise",
+    "📉 Charts",
+    "⚙️ Sistema"
+])
 # ============================================================
-# MOTOR TATI V.26 — MÓDULOS COMPLETOS
+#   MÓDULO 2 — MODELO (Poisson, EV, Score Híbrido, Turbo Mode)
 # ============================================================
 
-# -----------------------------
-# MÓDULO 1 — PRÉ-PROCESSAMENTO
-# -----------------------------
+# ---------------------------
+# POISSON (com cache)
+# ---------------------------
+@st.cache_data
+def poisson_prob(lmbda, goals):
+    return (lmbda**goals * np.exp(-lmbda)) / np.math.factorial(goals)
 
-def prepare_team_stats(row):
-    team_A_stats = {
-        "name": row["team_A"],
-        "goals_avg": row["A_goals_avg"],
-        "conc_avg": row["A_conc_avg"],
-        "form": row["A_form"],
-        "league_factor": row["league_factor"],
-        "home": True
-    }
-
-    team_B_stats = {
-        "name": row["team_B"],
-        "goals_avg": row["B_goals_avg"],
-        "conc_avg": row["B_conc_avg"],
-        "form": row["B_form"],
-        "league_factor": row["league_factor"],
-        "home": False
-    }
-
-    return team_A_stats, team_B_stats
-
-
-def apply_home_away_adjustments(team_stats):
-    HOME_FACTOR = 1.10
-    AWAY_FACTOR = 0.90
-
-    if team_stats["home"]:
-        team_stats["goals_avg"] *= HOME_FACTOR
-        team_stats["conc_avg"] *= AWAY_FACTOR
-    else:
-        team_stats["goals_avg"] *= AWAY_FACTOR
-        team_stats["conc_avg"] *= HOME_FACTOR
-
-    team_stats["goals_avg"] *= team_stats["league_factor"]
-    team_stats["conc_avg"] *= team_stats["league_factor"]
-
-    return team_stats
-
-
-# -----------------------------
-# MÓDULO 2 — XG HÍBRIDO
-# -----------------------------
-
-def calculate_offensive_xg(team_stats):
-    return team_stats["goals_avg"] * team_stats["form"] * team_stats["league_factor"]
-
-def calculate_defensive_xg(team_stats):
-    return team_stats["conc_avg"] * team_stats["form"] * team_stats["league_factor"]
-
-def adjust_xg_for_opponent(xg_value, opponent_stats):
-    strength_factor = opponent_stats["goals_avg"] / opponent_stats["conc_avg"]
-    return xg_value * strength_factor
-
-def final_xg(team_A_stats, team_B_stats):
-    xg_A_off = calculate_offensive_xg(team_A_stats)
-    xg_B_off = calculate_offensive_xg(team_B_stats)
-
-    xg_A_final = adjust_xg_for_opponent(xg_A_off, team_B_stats)
-    xg_B_final = adjust_xg_for_opponent(xg_B_off, team_A_stats)
-
-    return xg_A_final, xg_B_final
-
-
-# -----------------------------
-# MÓDULO 3 — POISSON
-# -----------------------------
-
-def poisson_distribution(xg):
-    dist = []
-    for k in range(5):
-        prob = (math.exp(-xg) * (xg ** k)) / math.factorial(k)
-        dist.append(prob)
-    return dist
-
-def joint_goal_matrix(xg_A, xg_B):
-    dist_A = poisson_distribution(xg_A)
-    dist_B = poisson_distribution(xg_B)
-
-    matrix = []
-    for i in range(5):
-        row = []
-        for j in range(5):
-            row.append(dist_A[i] * dist_B[j])
-        matrix.append(row)
-
-    return matrix
-
-
-# -----------------------------
-# MÓDULO 4 — PROBABILIDADES
-# -----------------------------
-
-def prob_1x2(matrix):
+# ---------------------------
+# PROBABILIDADES 1X2
+# ---------------------------
+def prob_1x2(avg_A, avg_B):
+    max_goals = 10
     p_home = p_draw = p_away = 0
 
-    for i in range(5):
-        for j in range(5):
-            if i > j:
-                p_home += matrix[i][j]
-            elif i == j:
-                p_draw += matrix[i][j]
+    for gA in range(max_goals):
+        for gB in range(max_goals):
+            p = poisson_prob(avg_A, gA) * poisson_prob(avg_B, gB)
+            if gA > gB:
+                p_home += p
+            elif gA == gB:
+                p_draw += p
             else:
-                p_away += matrix[i][j]
+                p_away += p
 
     return p_home, p_draw, p_away
 
-
-def prob_btts_yes(matrix):
-    p = 0
-    for i in range(1, 5):
-        for j in range(1, 5):
-            p += matrix[i][j]
-    return p
-
-
-def prob_btts_no(matrix):
-    return 1 - prob_btts_yes(matrix)
-
-
-def prob_over_under(matrix):
-    totals = {}
-
-    for line in [0.5, 1.5, 2.5, 3.5]:
-        over = under = 0
-
-        for i in range(5):
-            for j in range(5):
-                total = i + j
-                if total > line:
-                    over += matrix[i][j]
-                else:
-                    under += matrix[i][j]
-
-        totals[f"over_{line}"] = over
-        totals[f"under_{line}"] = under
-
-    return totals
-    # ============================================================
-# MÓDULO DE ODDS, FAIR ODDS, EDGE E VALOR ESPERADO
-# ============================================================
-
-# -----------------------------
+# ---------------------------
 # FAIR ODDS
-# -----------------------------
+# ---------------------------
+def fair_odds(prob):
+    return 1 / prob if prob > 0 else 999
 
-def fair_odd(prob):
-    if prob == 0:
-        return None
-    return 1 / prob
-
-
-# -----------------------------
-# PROBABILIDADE IMPLÍCITA
-# -----------------------------
-
-def implied_prob(odd):
-    if odd is None or odd == 0:
-        return None
-    return 1 / odd
-
-
-# -----------------------------
+# ---------------------------
 # EDGE
-# -----------------------------
+# ---------------------------
+def calc_edge(prob, odd):
+    return prob - (1 / odd)
 
-def calculate_edge(real_prob, odd):
-    imp = implied_prob(odd)
-    if imp is None:
-        return None
-    return real_prob - imp
+# ---------------------------
+# EV
+# ---------------------------
+def calc_ev(prob, odd):
+    return (prob * (odd - 1)) - (1 - prob)
 
+# ---------------------------
+# VOLATILIDADE DO JOGO
+# ---------------------------
+def calc_volatilidade(prob_home, prob_draw, prob_away):
+    probs = np.array([prob_home, prob_draw, prob_away])
+    return np.std(probs)
 
-# -----------------------------
-# VALOR ESPERADO (EV)
-# -----------------------------
+# ---------------------------
+# CONFIANÇA DA LIGA
+# (placeholder ajustável no futuro)
+# ---------------------------
+def calc_confianca_liga(league_factor):
+    return min(1, max(0, league_factor / 1.5))
 
-def expected_value(real_prob, odd):
-    if odd is None:
-        return None
-    return (real_prob * (odd - 1)) - (1 - real_prob)
-
-
-# -----------------------------
-# DETEÇÃO AUTOMÁTICA DE ODDS NO CSV
-# -----------------------------
-
-def get_odds_from_csv(row, col_name):
-    if col_name in row and not pd.isna(row[col_name]):
-        return float(row[col_name])
-    return None
-
-
-# -----------------------------
-# FALLBACK MANUAL (SE FALTAR NO CSV)
-# -----------------------------
-
-def get_manual_or_csv_odd(row, col_name, label):
-    csv_odd = get_odds_from_csv(row, col_name)
-
-    if csv_odd is not None:
-        return csv_odd
-
-    return st.number_input(
-        f"Odd para {label}",
-        min_value=1.01,
-        max_value=1000.0,
-        value=1.50,
-        step=0.01
+# ---------------------------
+# SCORE HÍBRIDO (0–100)
+# ---------------------------
+def score_hibrido(ev, edge, prob, forma_A, forma_B, volatilidade, confianca):
+    score_mat = (
+        (ev * 50) +
+        (edge * 30) +
+        (prob * 20)
     )
-    # ============================================================
-# UPLOAD DO CSV + SELEÇÃO DE JOGO
+# ============================================================
+#   MÓDULO 3 — MERCADO (processamento completo dos jogos)
 # ============================================================
 
-df = None
-selected_row = None
+def processar_jogos(df):
+    resultados = []
 
-if menu == "Upload de Dados":
-    st.header("📥 Upload do CSV")
+    for _, row in df.iterrows():
+        team_A = row["team_A"]
+        team_B = row["team_B"]
 
-    uploaded_file = st.file_uploader("Carrega o CSV preparado pelo TATI", type=["csv"])
+        # xG ajustado pelo league_factor
+        avg_A = row["A_goals_avg"] * row["league_factor"]
+        avg_B = row["B_goals_avg"] * row["league_factor"]
 
-    if uploaded_file is not None:
-        df = pd.read_csv(uploaded_file)
-        st.success("CSV carregado com sucesso!")
-        st.dataframe(df)
+        # Probabilidades 1X2
+        p_home, p_draw, p_away = prob_1x2(avg_A, avg_B)
 
-        # Criar nome automático do jogo
-        df["match_name"] = df["team_A"] + " vs " + df["team_B"]
+        # Fair odds
+        fair_1 = fair_odds(p_home)
+        fair_x = fair_odds(p_draw)
+        fair_2 = fair_odds(p_away)
 
-        st.info("Agora vai ao menu lateral e escolhe um separador para continuar.")
+        # Edge
+        edge_1 = calc_edge(p_home, row["odd_1"])
+        edge_x = calc_edge(p_draw, row["odd_x"])
+        edge_2 = calc_edge(p_away, row["odd_2"])
 
-else:
-    # Só permite navegar se já houver CSV carregado
-    if "df" not in st.session_state:
-        st.warning("Carrega primeiro um CSV no separador 'Upload de Dados'.")
+        # EV
+        EV_1 = calc_ev(p_home, row["odd_1"])
+        EV_X = calc_ev(p_draw, row["odd_x"])
+        EV_2 = calc_ev(p_away, row["odd_2"])
+
+        # Melhor pick
+        melhor_pick, EV_pick = max(
+            [("1", EV_1), ("X", EV_X), ("2", EV_2)],
+            key=lambda x: x[1]
+        )
+
+        # Odd da pick
+        odd_pick = row["odd_1"] if melhor_pick == "1" else (
+            row["odd_x"] if melhor_pick == "X" else row["odd_2"]
+        )
+
+        # Volatilidade
+        volatilidade = calc_volatilidade(p_home, p_draw, p_away)
+
+        # Confiança da liga
+        confianca = calc_confianca_liga(row["league_factor"])
+
+        # Score híbrido
+        score = score_hibrido(
+            EV_pick,
+            calc_edge(p_home if melhor_pick == "1" else p_draw if melhor_pick == "X" else p_away, odd_pick),
+            p_home if melhor_pick == "1" else p_draw if melhor_pick == "X" else p_away,
+            row["A_form"],
+            row["B_form"],
+            volatilidade,
+            confianca
+        )
+
+        resultados.append([
+            team_A, team_B,
+            round(p_home, 3), round(p_draw, 3), round(p_away, 3),
+            round(EV_1, 3), round(EV_X, 3), round(EV_2, 3),
+            melhor_pick, round(EV_pick, 3),
+            odd_pick,
+            round(volatilidade, 3),
+            round(confianca, 3),
+            score
+        ])
+
+    cols = [
+        "team_A", "team_B",
+        "p_home", "p_draw", "p_away",
+        "EV_1", "EV_X", "EV_2",
+        "melhor_pick", "EV_pick",
+        "odd_pick",
+        "volatilidade", "confianca",
+        "score"
+    ]
+
+    return pd.DataFrame(resultados, columns=cols)
+    # ============================================================
+#   MÓDULO 4 — ABA MERCADO (visualização principal)
+# ============================================================
+
+with tabs[0]:
+    st.header("📊 Mercado — Jogos e Indicadores do Modelo")
+
+    st.write("Carrega o ficheiro CSV com os jogos:")
+
+    uploaded = st.file_uploader("Seleciona o CSV", type=["csv"])
+
+    if uploaded:
+        df_raw = pd.read_csv(uploaded)
+
+        st.success("Ficheiro carregado com sucesso!")
+
+        # Processamento completo dos jogos
+        df_proc = processar_jogos(df_raw)
+
+        st.subheader("📌 Mercado Completo")
+
+        # Mostrar tabela completa
+        st.dataframe(
+            df_proc.style.background_gradient(
+                subset=["score"], cmap="Blues"
+            ).background_gradient(
+                subset=["EV_pick"], cmap="Greens"
+            ),
+            use_container_width=True
+        )
+
+        # Guardar no session_state para outras abas
+        st.session_state["df_proc"] = df_proc
+
     else:
-        df = st.session_state["df"]
-
-# Guardar o CSV carregado na sessão
-if df is not None:
-    st.session_state["df"] = df
-
-# ============================================================
-# SELEÇÃO DO JOGO (APARECE EM TODOS OS SEPARADORES)
+        st.warning("Aguardo o carregamento do ficheiro CSV para mostrar o mercado.")
+        # ============================================================
+#   MÓDULO 5 — ABA SINAIS (ranking, turbo mode, aposta do dia)
 # ============================================================
 
-if df is not None and menu != "Upload de Dados":
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("Escolher jogo")
+with tabs[1]:
+    st.header("🎯 Sinais — Picks do Modelo")
 
-    match_list = df["match_name"].tolist()
-
-    selected_match = st.sidebar.selectbox("Seleciona o jogo", match_list)
-
-    # Obter a linha correspondente
-    selected_row = df[df["match_name"] == selected_match].iloc[0]
-    # ============================================================
-# SEPARADOR: PROBABILIDADES
-# ============================================================
-
-if menu == "Probabilidades" and selected_row is not None:
-
-    st.header("📊 Probabilidades do Jogo")
-
-    # Preparar equipas
-    team_A, team_B = prepare_team_stats(selected_row)
-
-    team_A = apply_home_away_adjustments(team_A)
-    team_B = apply_home_away_adjustments(team_B)
-
-    # Calcular xG
-    xg_A, xg_B = final_xg(team_A, team_B)
-
-    # Matriz Poisson
-    matrix = joint_goal_matrix(xg_A, xg_B)
-
-    # Probabilidades
-    p_home, p_draw, p_away = prob_1x2(matrix)
-    p_btts_yes = prob_btts_yes(matrix)
-    p_btts_no = prob_btts_no(matrix)
-    overs = prob_over_under(matrix)
-
-    # Mostrar resultados
-    st.subheader("🔢 xG das Equipas")
-    st.write(f"**xG {team_A['name']}:** {xg_A:.2f}")
-    st.write(f"**xG {team_B['name']}:** {xg_B:.2f}")
-
-    st.subheader("🎯 Probabilidades 1X2")
-    st.write(f"Vitória {team_A['name']}: {p_home:.2%}")
-    st.write(f"Empate: {p_draw:.2%}")
-    st.write(f"Vitória {team_B['name']}: {p_away:.2%}")
-
-    st.subheader("🔥 BTTS")
-    st.write(f"BTTS Sim: {p_btts_yes:.2%}")
-    st.write(f"BTTS Não: {p_btts_no:.2%}")
-
-    st.subheader("📈 Over/Under")
-    st.json(overs)
-
-    # Guardar probabilidades na sessão para outros separadores
-    st.session_state["probs"] = {
-        "p_home": p_home,
-        "p_draw": p_draw,
-        "p_away": p_away,
-        "p_btts_yes": p_btts_yes,
-        "p_btts_no": p_btts_no,
-        "overs": overs,
-        "xg_A": xg_A,
-        "xg_B": xg_B,
-        "team_A": team_A["name"],
-        "team_B": team_B["name"]
-    }
-    # ============================================================
-# SEPARADOR: FAIR ODDS
-# ============================================================
-
-if menu == "Fair Odds" and selected_row is not None:
-
-    st.header("🎯 Fair Odds (Odds Justas)")
-
-    if "probs" not in st.session_state:
-        st.warning("Primeiro abre o separador 'Probabilidades'.")
+    if "df_proc" not in st.session_state:
+        st.warning("Carrega primeiro o CSV na aba Mercado.")
     else:
-        probs = st.session_state["probs"]
+        df = st.session_state["df_proc"].copy()
 
-        # Probabilidades reais
-        p_home = probs["p_home"]
-        p_draw = probs["p_draw"]
-        p_away = probs["p_away"]
-        p_btts_yes = probs["p_btts_yes"]
-        p_btts_no = probs["p_btts_no"]
-        overs = probs["overs"]
+        # ---------------------------
+        # TURBO MODE
+        # ---------------------------
+        turbo = st.toggle("🚀 Turbo Mode (picks fortes)")
 
-        st.subheader("⚖️ Fair Odds 1X2")
-        st.write(f"Vitória {probs['team_A']}: {fair_odd(p_home):.2f}")
-        st.write(f"Empate: {fair_odd(p_draw):.2f}")
-        st.write(f"Vitória {probs['team_B']}: {fair_odd(p_away):.2f}")
+        if turbo:
+            df = df[df.apply(turbo_filter, axis=1)]
+            st.success("Turbo Mode ativo — apenas picks fortes estão visíveis.")
+        else:
+            st.info("Turbo Mode desativado — todas as picks estão visíveis.")
 
-        st.subheader("🔥 Fair Odds BTTS")
-        st.write(f"BTTS Sim: {fair_odd(p_btts_yes):.2f}")
-        st.write(f"BTTS Não: {fair_odd(p_btts_no):.2f}")
+        # ---------------------------
+        # RANKING DAS PICKS
+        # ---------------------------
+        st.subheader("🏆 Ranking das Picks")
 
-        st.subheader("📈 Fair Odds Over/Under")
-        for line, prob in overs.items():
-            st.write(f"{line}: {fair_odd(prob):.2f}")
+        df_rank = df.sort_values(by="score", ascending=False)
+
+        st.dataframe(
+            df_rank.style.background_gradient(
+                subset=["score"], cmap="Blues"
+            ).background_gradient(
+                subset=["EV_pick"], cmap="Greens"
+            ),
+            use_container_width=True
+        )
+
+        # ---------------------------
+        # APOSTA DO DIA
+        # ---------------------------
+        st.subheader("🔥 Aposta do Dia")
+
+        if len(df_rank) > 0:
+            aposta_dia = df_rank.iloc[0]
+
+            st.markdown(f"""
+            ### **{aposta_dia['team_A']} vs {aposta_dia['team_B']}**
+            **Pick:** {aposta_dia['melhor_pick']}  
+            **Odd:** {aposta_dia['odd_pick']}  
+            **EV:** {aposta_dia['EV_pick']}  
+            **Score:** {aposta_dia['score']}  
+            """)
+
+            # Guardar aposta do dia para registo
+            st.session_state["aposta_dia"] = aposta_dia
+
+            # Botão para registar aposta
+            if st.button("📝 Registar esta aposta"):
+                if "historico" not in st.session_state:
+                    st.session_state["historico"] = []
+
+                st.session_state["historico"].append({
+                    "team_A": aposta_dia["team_A"],
+                    "team_B": aposta_dia["team_B"],
+                    "pick": aposta_dia["melhor_pick"],
+                    "odd": aposta_dia["odd_pick"],
+                    "EV": aposta_dia["EV_pick"],
+                    "score": aposta_dia["score"],
+                    "resultado": None
+                })
+
+                st.success("Aposta registada com sucesso!")
+        else:
+            st.warning("Nenhuma pick disponível (Turbo Mode pode estar a filtrar tudo).")
             # ============================================================
-# SEPARADOR: EDGE
+#   MÓDULO 6 — ABA REGISTO (histórico, resultados, ROI)
 # ============================================================
 
-if menu == "Edge" and selected_row is not None:
+with tabs[2]:
+    st.header("📝 Registo — Histórico de Apostas")
 
-    st.header("📈 Edge — Valor Real vs Odd da Casa")
+    # Criar histórico se não existir
+    if "historico" not in st.session_state:
+        st.session_state["historico"] = []
 
-    if "probs" not in st.session_state:
-        st.warning("Primeiro abre o separador 'Probabilidades'.")
+    historico = st.session_state["historico"]
+
+    # ---------------------------
+    # MOSTRAR HISTÓRICO
+    # ---------------------------
+    if len(historico) == 0:
+        st.info("Ainda não existem apostas registadas.")
     else:
-        probs = st.session_state["probs"]
+        st.subheader("📚 Histórico de Apostas")
 
-        # Probabilidades reais
-        p_home = probs["p_home"]
-        p_draw = probs["p_draw"]
-        p_away = probs["p_away"]
-        p_btts_yes = probs["p_btts_yes"]
-        p_btts_no = probs["p_btts_no"]
-        overs = probs["overs"]
+        df_hist = pd.DataFrame(historico)
 
-        st.subheader("📥 Introdução de Odds (CSV + Manual)")
+        st.dataframe(
+            df_hist.style.background_gradient(
+                subset=["EV"], cmap="Greens"
+            ).background_gradient(
+                subset=["score"], cmap="Blues"
+            ),
+            use_container_width=True
+        )
 
-        # Odds 1X2
-        odd_home = get_manual_or_csv_odd(selected_row, "odd_1", f"Vitória {probs['team_A']}")
-        odd_draw = get_manual_or_csv_odd(selected_row, "odd_x", "Empate")
-        odd_away = get_manual_or_csv_odd(selected_row, "odd_2", f"Vitória {probs['team_B']}")
+        # ---------------------------
+        # ATUALIZAR RESULTADOS
+        # ---------------------------
+        st.subheader("⚽ Atualizar Resultados")
 
-        # Odds BTTS
-        odd_btts_yes = get_manual_or_csv_odd(selected_row, "odd_btts_yes", "BTTS Sim")
-        odd_btts_no = get_manual_or_csv_odd(selected_row, "odd_btts_no", "BTTS Não")
+        idx = st.number_input(
+            "Número da aposta (linha do histórico)",
+            min_value=0,
+            max_value=len(df_hist) - 1,
+            step=1
+        )
 
-        # Odds Over/Under 2.5 (exemplo base)
-        odd_over_25 = get_manual_or_csv_odd(selected_row, "odd_over_25", "Over 2.5")
-        odd_under_25 = get_manual_or_csv_odd(selected_row, "odd_under_25", "Under 2.5")
+        resultado = st.selectbox(
+            "Resultado da aposta",
+            ["Vitória", "Derrota", "Void"]
+        )
 
-        st.markdown("---")
-        st.subheader("📊 Edge 1X2")
+        if st.button("Atualizar Resultado"):
+            aposta = historico[idx]
 
-        st.write(f"Vitória {probs['team_A']}: {calculate_edge(p_home, odd_home):.4f}")
-        st.write(f"Empate: {calculate_edge(p_draw, odd_draw):.4f}")
-        st.write(f"Vitória {probs['team_B']}: {calculate_edge(p_away, odd_away):.4f}")
+            if resultado == "Vitória":
+                aposta["resultado"] = "Vitória"
+                aposta["lucro"] = aposta["odd"] - 1
+            elif resultado == "Derrota":
+                aposta["resultado"] = "Derrota"
+                aposta["lucro"] = -1
+            else:
+                aposta["resultado"] = "Void"
+                aposta["lucro"] = 0
 
-        st.subheader("🔥 Edge BTTS")
-        st.write(f"BTTS Sim: {calculate_edge(p_btts_yes, odd_btts_yes):.4f}")
-        st.write(f"BTTS Não: {calculate_edge(p_btts_no, odd_btts_no):.4f}")
+            st.success("Resultado atualizado com sucesso!")
 
-        st.subheader("📈 Edge Over/Under 2.5")
-        st.write(f"Over 2.5: {calculate_edge(overs['over_2.5'], odd_over_25):.4f}")
-        st.write(f"Under 2.5: {calculate_edge(overs['under_2.5'], odd_under_25):.4f}")
+        # ---------------------------
+        # MÉTRICAS DE PERFORMANCE
+        # ---------------------------
+        st.subheader("📈 Performance")
 
-        # Guardar odds e edges para os separadores seguintes
-        st.session_state["odds"] = {
-            "odd_home": odd_home,
-            "odd_draw": odd_draw,
-            "odd_away": odd_away,
-            "odd_btts_yes": odd_btts_yes,
-            "odd_btts_no": odd_btts_no,
-            "odd_over_25": odd_over_25,
-            "odd_under_25": odd_under_25
-        }
-        # ============================================================
-# SEPARADOR: VALOR ESPERADO
+        df_hist = pd.DataFrame(historico)
+
+        if "lucro" in df_hist.columns:
+            total_lucro = df_hist["lucro"].sum()
+            num_apostas = len(df_hist[df_hist["resultado"].notna()])
+            num_vitorias = len(df_hist[df_hist["resultado"] == "Vitória"])
+
+            roi = (total_lucro / num_apostas) * 100 if num_apostas > 0 else 0
+            acerto = (num_vitorias / num_apostas) * 100 if num_apostas > 0 else 0
+
+            col1, col2, col3 = st.columns(3)
+
+            col1.metric("💰 Lucro Total", f"{total_lucro:.2f} unidades")
+            col2.metric("📊 ROI", f"{roi:.2f}%")
+            col3.metric("🎯 Taxa de Acerto", f"{acerto:.2f}%")
+        else:
+            st.info("Atualiza pelo menos um resultado para ver as métricas.")
+            # ============================================================
+#   MÓDULO 7 — ABA ANÁLISE (ROI, EV real, heatmaps)
 # ============================================================
 
-if menu == "Valor Esperado" and selected_row is not None:
+with tabs[3]:
+    st.header("📈 Análise — Performance Detalhada")
 
-    st.header("💰 Valor Esperado (EV)")
-
-    if "probs" not in st.session_state or "odds" not in st.session_state:
-        st.warning("Abre primeiro os separadores 'Probabilidades' e 'Edge'.")
+    if "historico" not in st.session_state or len(st.session_state["historico"]) == 0:
+        st.info("Ainda não existem dados suficientes no histórico para análise.")
     else:
-        probs = st.session_state["probs"]
-        odds = st.session_state["odds"]
+        df_hist = pd.DataFrame(st.session_state["historico"])
 
-        # Probabilidades reais
-        p_home = probs["p_home"]
-        p_draw = probs["p_draw"]
-        p_away = probs["p_away"]
-        p_btts_yes = probs["p_btts_yes"]
-        p_btts_no = probs["p_btts_no"]
-        overs = probs["overs"]
+        if "lucro" not in df_hist.columns:
+            st.warning("Atualiza pelo menos um resultado na aba Registo para ativar a análise.")
+        else:
+            st.subheader("📊 ROI por Tipo de Pick (1 / X / 2)")
 
-        # Odds reais
-        odd_home = odds["odd_home"]
-        odd_draw = odds["odd_draw"]
-        odd_away = odds["odd_away"]
-        odd_btts_yes = odds["odd_btts_yes"]
-        odd_btts_no = odds["odd_btts_no"]
-        odd_over_25 = odds["odd_over_25"]
-        odd_under_25 = odds["odd_under_25"]
+            roi_tipo = (
+                df_hist.groupby("pick")["lucro"]
+                .sum()
+                .div(df_hist.groupby("pick")["lucro"].count())
+                .fillna(0) * 100
+            )
 
-        # Calcular EV
-        ev_data = [
-            ("Vitória " + probs["team_A"], expected_value(p_home, odd_home)),
-            ("Empate", expected_value(p_draw, odd_draw)),
-            ("Vitória " + probs["team_B"], expected_value(p_away, odd_away)),
-            ("BTTS Sim", expected_value(p_btts_yes, odd_btts_yes)),
-            ("BTTS Não", expected_value(p_btts_no, odd_btts_no)),
-            ("Over 2.5", expected_value(overs["over_2.5"], odd_over_25)),
-            ("Under 2.5", expected_value(overs["under_2.5"], odd_under_25)),
-        ]
+            st.bar_chart(roi_tipo)
 
-        df_ev = pd.DataFrame(ev_data, columns=["Mercado", "EV"])
-        df_ev["EV"] = df_ev["EV"].astype(float)
+            # ---------------------------
+            # ROI por faixa de odds
+            # ---------------------------
+            st.subheader("🎯 ROI por Faixa de Odds")
 
-        st.subheader("📊 Tabela de Valor Esperado")
-        st.dataframe(df_ev)
+            df_hist["faixa_odds"] = pd.cut(
+                df_hist["odd"],
+                bins=[1.0, 1.5, 2.0, 3.0, 5.0, 10.0],
+                labels=["1.00–1.50", "1.51–2.00", "2.01–3.00", "3.01–5.00", "5.01–10.00"]
+            )
 
-        # Guardar para o ranking
-        st.session_state["ev_table"] = df_ev
+            roi_odds = (
+                df_hist.groupby("faixa_odds")["lucro"]
+                .sum()
+                .div(df_hist.groupby("faixa_odds")["lucro"].count())
+                .fillna(0) * 100
+            )
 
+            st.bar_chart(roi_odds)
 
+            # ---------------------------
+            # EV real vs EV previsto
+            # ---------------------------
+            st.subheader("📉 EV Real vs EV Previsto")
+
+            df_hist["EV_real"] = df_hist["lucro"]
+
+            col1, col2 = st.columns(2)
+            col1.metric("EV Médio Previsto", f"{df_hist['EV'].mean():.3f}")
+            col2.metric("EV Médio Real", f"{df_hist['EV_real'].mean():.3f}")
+
+            st.line_chart(df_hist[["EV", "EV_real"]])
+
+            # ---------------------------
+            # Heatmap de Performance
+            # ---------------------------
+            st.subheader("🔥 Heatmap de Performance por Score")
+
+            df_hist["score_bucket"] = pd.cut(
+                df_hist["score"],
+                bins=[0, 40, 60, 80, 100],
+                labels=["0–40", "41–60", "61–80", "81–100"]
+            )
+
+            heatmap = (
+                df_hist.groupby("score_bucket")["lucro"]
+                .sum()
+                .reindex(["0–40", "41–60", "61–80", "81–100"])
+                .fillna(0)
+            )
+
+            st.bar_chart(heatmap)
+
+            # ---------------------------
+            # Tabela final de análise
+            # ---------------------------
+            st.subheader("📘 Tabela de Análise Completa")
+
+            st.dataframe(df_hist, use_container_width=True)
+            # ============================================================
+#   MÓDULO 8 — ABA CHARTS (curvas, distribuições, evolução)
 # ============================================================
-# SEPARADOR: RANKING
-# ============================================================
 
-if menu == "Ranking" and selected_row is not None:
+with tabs[4]:
+    st.header("📉 Charts — Evolução e Distribuições")
 
-    st.header("🏆 Ranking de Valor")
-
-    if "ev_table" not in st.session_state:
-        st.warning("Abre primeiro o separador 'Valor Esperado'.")
+    if "historico" not in st.session_state or len(st.session_state["historico"]) == 0:
+        st.info("Ainda não existem dados suficientes no histórico para gerar gráficos.")
     else:
-        df_ev = st.session_state["ev_table"]
+        df_hist = pd.DataFrame(st.session_state["historico"])
 
-        df_sorted = df_ev.sort_values(by="EV", ascending=False)
+        if "lucro" not in df_hist.columns:
+            st.warning("Atualiza pelo menos um resultado na aba Registo para ativar os gráficos.")
+        else:
+            # ---------------------------------------------------
+            # CURVA DA BANCA
+            # ---------------------------------------------------
+            st.subheader("💰 Curva da Banca")
 
-        st.subheader("🔝 Melhores Apostas (por EV)")
-        st.dataframe(df_sorted)
+            df_hist["banca"] = df_hist["lucro"].cumsum()
 
-        # Guardar melhor aposta para o separador seguinte
-        st.session_state["best_bet"] = df_sorted.iloc[0]
-        # ============================================================
-# SEPARADOR: APOSTA DO DIA
+            st.line_chart(df_hist["banca"])
+
+            # ---------------------------------------------------
+            # CURVA DE EV
+            # ---------------------------------------------------
+            st.subheader("📈 Evolução do EV Previsto")
+
+            st.line_chart(df_hist["EV"])
+
+            # ---------------------------------------------------
+            # CURVA DE ACERTO
+            # ---------------------------------------------------
+            st.subheader("🎯 Evolução da Taxa de Acerto")
+
+            df_hist["acerto"] = df_hist["resultado"].apply(
+                lambda x: 1 if x == "Vitória" else 0
+            )
+
+            df_hist["acerto_acumulado"] = (
+                df_hist["acerto"].cumsum() / (df_hist.index + 1)
+            )
+
+            st.line_chart(df_hist["acerto_acumulado"])
+
+            # ---------------------------------------------------
+            # DISTRIBUIÇÃO DE ODDS
+            # ---------------------------------------------------
+            st.subheader("📊 Distribuição das Odds")
+
+            st.bar_chart(df_hist["odd"].value_counts().sort_index())
+
+            # ---------------------------------------------------
+            # DISTRIBUIÇÃO DE SCORES
+            # ---------------------------------------------------
+            st.subheader("🔥 Distribuição dos Scores")
+
+            st.bar_chart(df_hist["score"].value_counts().sort_index())
+
+            # ---------------------------------------------------
+            # TABELA FINAL
+            # ---------------------------------------------------
+            st.subheader("📘 Dados Utilizados nos Gráficos")
+
+            st.dataframe(df_hist, use_container_width=True
+            # ============================================================
+#   MÓDULO 9 — ABA SISTEMA (configurações, reset, exportação)
 # ============================================================
 
-if menu == "Aposta do Dia" and selected_row is not None:
+with tabs[5]:
+    st.header("⚙️ Sistema — Configurações e Gestão")
 
-    st.header("⭐ Aposta do Dia")
+    st.subheader("🔧 Configurações Avançadas do Modelo")
 
-    if "best_bet" not in st.session_state:
-        st.warning("Abre primeiro o separador 'Ranking'.")
+    # Pesos ajustáveis (para futura afinação)
+    peso_ev = st.slider("Peso do EV no Score", 0, 100, 50)
+    peso_edge = st.slider("Peso do Edge no Score", 0, 100, 30)
+    peso_prob = st.slider("Peso da Probabilidade no Score", 0, 100, 20)
+
+    peso_forma = st.slider("Peso da Forma no Score", 0, 100, 40)
+    peso_confianca = st.slider("Peso da Confiança no Score", 0, 100, 30)
+    peso_volatilidade = st.slider("Peso da Volatilidade no Score", 0, 100, 30)
+
+    st.info("Estes pesos ainda não alteram o score final, mas já ficam guardados para integração futura.")
+
+    # Guardar configurações
+    if st.button("💾 Guardar Configurações"):
+        st.session_state["config"] = {
+            "peso_ev": peso_ev,
+            "peso_edge": peso_edge,
+            "peso_prob": peso_prob,
+            "peso_forma": peso_forma,
+            "peso_confianca": peso_confianca,
+            "peso_volatilidade": peso_volatilidade
+        }
+        st.success("Configurações guardadas com sucesso!")
+
+    st.markdown("---")
+
+    # ---------------------------------------------------
+    # EXPORTAÇÃO DO HISTÓRICO
+    # ---------------------------------------------------
+    st.subheader("📤 Exportar Histórico")
+
+    if "historico" in st.session_state and len(st.session_state["historico"]) > 0:
+        df_export = pd.DataFrame(st.session_state["historico"])
+        st.download_button(
+            label="📥 Download do Histórico (CSV)",
+            data=df_export.to_csv(index=False),
+            file_name="historico_tati_v26.csv",
+            mime="text/csv"
+        )
     else:
-        best = st.session_state["best_bet"]
+        st.info("Ainda não existe histórico para exportar.")
 
-        st.subheader("🏅 Melhor Aposta Encontrada")
+    st.markdown("---")
 
-        mercado = best["Mercado"]
-        ev = best["EV"]
+    # ---------------------------------------------------
+    # RESET AO HISTÓRICO
+    # ---------------------------------------------------
+    st.subheader("🗑 Reset ao Histórico")
 
-        st.write(f"**Mercado:** {mercado}")
-        st.write(f"**Valor Esperado (EV):** {ev:.4f}")
+    if st.button("Apagar Histórico"):
+        st.session_state["historico"] = []
+        st.success("Histórico apagado com sucesso!")
 
-        # Mostrar odd correspondente
-        odds = st.session_state["odds"]
-        probs = st.session_state["probs"]
+    st.markdown("---")
 
-        odd_map = {
-            f"Vitória {probs['team_A']}": odds["odd_home"],
-            "Empate": odds["odd_draw"],
-            f"Vitória {probs['team_B']}": odds["odd_away"],
-            "BTTS Sim": odds["odd_btts_yes"],
-            "BTTS Não": odds["odd_btts_no"],
-            "Over 2.5": odds["odd_over_25"],
-            "Under 2.5": odds["odd_under_25"]
-        }
+    # ---------------------------------------------------
+    # RESET TOTAL DO SISTEMA
+    # ---------------------------------------------------
+    st.subheader("⚠️ Reset Total do Sistema")
 
-        prob_map = {
-            f"Vitória {probs['team_A']}": probs["p_home"],
-            "Empate": probs["p_draw"],
-            f"Vitória {probs['team_B']}": probs["p_away"],
-            "BTTS Sim": probs["p_btts_yes"],
-            "BTTS Não": probs["p_btts_no"],
-            "Over 2.5": probs["overs"]["over_2.5"],
-            "Under 2.5": probs["overs"]["under_2.5"]
-        }
-
-        st.write(f"**Odd utilizada:** {odd_map[mercado]:.2f}")
-        st.write(f"**Probabilidade real:** {prob_map[mercado]:.2%}")
-
-        st.success("Esta é a aposta com maior valor esperado segundo o modelo TATI V.26.")
-        # ============================================================
-# SEPARADOR: GESTÃO DE BANCA
-# ============================================================
-
-if menu == "Gestão de Banca" and selected_row is not None:
-
-    st.header("💼 Gestão de Banca")
-
-    if "best_bet" not in st.session_state or "odds" not in st.session_state:
-        st.warning("Abre primeiro o separador 'Aposta do Dia'.")
-    else:
-        best = st.session_state["best_bet"]
-        odds = st.session_state["odds"]
-        probs = st.session_state["probs"]
-
-        mercado = best["Mercado"]
-        ev = best["EV"]
-
-        st.subheader("📌 Aposta Selecionada")
-        st.write(f"**Mercado:** {mercado}")
-        st.write(f"**EV:** {ev:.4f}")
-
-        # Mapear odds e probabilidades
-        odd_map = {
-            f"Vitória {probs['team_A']}": odds["odd_home"],
-            "Empate": odds["odd_draw"],
-            f"Vitória {probs['team_B']}": odds["odd_away"],
-            "BTTS Sim": odds["odd_btts_yes"],
-            "BTTS Não": odds["odd_btts_no"],
-            "Over 2.5": odds["odd_over_25"],
-            "Under 2.5": odds["odd_under_25"]
-        }
-
-        prob_map = {
-            f"Vitória {probs['team_A']}": probs["p_home"],
-            "Empate": probs["p_draw"],
-            f"Vitória {probs['team_B']}": probs["p_away"],
-            "BTTS Sim": probs["p_btts_yes"],
-            "BTTS Não": probs["p_btts_no"],
-            "Over 2.5": probs["overs"]["over_2.5"],
-            "Under 2.5": probs["overs"]["under_2.5"]
-        }
-
-        odd = odd_map[mercado]
-        p = prob_map[mercado]
-
-        st.write(f"**Odd:** {odd:.2f}")
-        st.write(f"**Probabilidade real:** {p:.2%}")
-
-        st.markdown("---")
-
-        st.subheader("💰 Cálculo de Stake (Kelly Fracionado)")
-
-        banca = st.number_input("Banca atual (€)", min_value=1.0, value=100.0, step=1.0)
-        fracao = st.slider("Fração de Kelly (%)", min_value=5, max_value=50, value=20)
-
-        # Kelly
-        kelly = ((odd * p) - (1 - p)) / (odd - 1)
-        kelly = max(kelly, 0)
-
-        stake = banca * kelly * (fracao / 100)
-
-        st.write(f"**Kelly puro:** {kelly:.4f}")
-        st.write(f"**Stake recomendada:** {stake:.2f} €")
-
-        st.success("Gestão de banca calculada com sucesso.")
+    if st.button("🔄 Reset Completo"):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.success("Sistema totalmente reiniciado! Recarrega a página."
+        
