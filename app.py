@@ -40,8 +40,10 @@ tabs = st.tabs([
 # ----------------------------
 # MÓDULO 2 — MODELO (Poisson, EV, Score)
 # ----------------------------
+import math
+
 def poisson_prob(lmbda, goals):
-    return (lmbda**goals * np.exp(-lmbda)) / np.math.factorial(goals)
+    return (lmbda**goals * math.exp(-lmbda)) / math.factorial(goals)
 
 def prob_1x2(avg_A, avg_B):
     max_goals = 10
