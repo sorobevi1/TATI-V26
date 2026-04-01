@@ -43,6 +43,40 @@ tabs = st.tabs([
 @st.cache_data
 def poisson_prob(lmbda, goals):
     return (lmbda**goals * np.exp(-lmbda)) / np.math.factorial(goals)
+
+def prob_1x2(avg_A, avg_B):
+    max_goals = 10
+    probs = np.zeros(3)
+
+    for gA in range(max_goals):
+        for gB in range(max_goals):
+            pA = poisson_prob(avg_A, gA)
+            pB = poisson_prob(avg_B, gB)
+
+            if gA > gB:
+                probs[0] += pA * pB
+            elif gA == gB:
+                probs[1] += pA * pB
+            else:
+                probs[2] += pA * pB
+
+    return probs  # [1, X, 2]
+
+def calcular_ev(prob, odd):
+    return prob * odd - 1
+
+def score_hibrido(ev, edge, prob, conf, vol):
+    return (
+        ev * 40 +
+        edge * 20 +
+        prob * 15 +
+        conf * 15 -
+        vol * 10
+    )
+ # ----------------------------
+# MÓDULO 3 — PROCESSAMENTO DO MERCADO
+# ----------------------------
+def processar_jogos(df):
     resultados = []
 
     for _, row in df.iterrows():
@@ -79,7 +113,11 @@ def poisson_prob(lmbda, goals):
         })
 
     return pd.DataFrame(resultados)
-    with tabs[0]:
+
+# ----------------------------
+# MÓDULO 4 — ABA MERCADO
+# ----------------------------
+with tabs[0]:
     st.header("📊 Mercado — Jogos e Indicadores")
 
     uploaded = st.file_uploader("Carrega o CSV", type=["csv"])
@@ -93,7 +131,11 @@ def poisson_prob(lmbda, goals):
         st.dataframe(df_proc, use_container_width=True)
     else:
         st.info("Aguardo o CSV.")
-        with tabs[1]:
+
+# ----------------------------
+# MÓDULO 5 — ABA SINAIS
+# ----------------------------
+with tabs[1]:
     st.header("🎯 Sinais — Picks do Modelo")
 
     if "df_proc" not in st.session_state:
@@ -121,7 +163,11 @@ def poisson_prob(lmbda, goals):
                 "resultado": None
             })
             st.success("Aposta registada!")
-            with tabs[2]:
+
+# ----------------------------
+# MÓDULO 6 — ABA REGISTO
+# ----------------------------
+with tabs[2]:
     st.header("📝 Registo — Histórico")
 
     if "historico" not in st.session_state or len(st.session_state["historico"]) == 0:
@@ -142,7 +188,10 @@ def poisson_prob(lmbda, goals):
                 else 0
             )
             st.success("Atualizado!")
-            with tabs[3]:
+ # ----------------------------
+# MÓDULO 7 — ABA ANÁLISE
+# ----------------------------
+with tabs[3]:
     st.header("📈 Análise")
 
     if "historico" not in st.session_state:
@@ -154,13 +203,21 @@ def poisson_prob(lmbda, goals):
         else:
             df["banca"] = df["lucro"].cumsum()
             st.line_chart(df["banca"])
-            with tabs[4]:
+
+# ----------------------------
+# MÓDULO 8 — ABA CHARTS
+# ----------------------------
+with tabs[4]:
     st.header("📉 Charts")
 
     if "historico" in st.session_state:
         df = pd.DataFrame(st.session_state["historico"])
         st.bar_chart(df["odd"].value_counts())
-        with tabs[5]:
+
+# ----------------------------
+# MÓDULO 9 — ABA SISTEMA
+# ----------------------------
+with tabs[5]:
     st.header("⚙️ Sistema")
 
     if st.button("Reset Histórico"):
@@ -169,5 +226,4 @@ def poisson_prob(lmbda, goals):
 
     if st.button("Reset Total"):
         st.session_state.clear()
-        st.success("Sistema reiniciado!")
-        
+        st.success("Sistema reiniciado!")           
