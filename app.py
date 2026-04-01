@@ -40,7 +40,6 @@ tabs = st.tabs([
 # ----------------------------
 # MÓDULO 2 — MODELO (Poisson, EV, Score)
 # ----------------------------
-@st.cache_data
 def poisson_prob(lmbda, goals):
     return (lmbda**goals * np.exp(-lmbda)) / np.math.factorial(goals)
 
