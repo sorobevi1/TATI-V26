@@ -2,13 +2,20 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
+# ----------------------------
+# CONFIGURAÇÃO BASE
+# ----------------------------
 st.set_page_config(
     page_title="TATI V26 PRO",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("📈 TATI V26 PRO — Painel de Trading Esportivo")
+st.title("📈 TATI V26 PRO — Painel de Trading Estatístico")
+
+# ----------------------------
+# MODO DESENVOLVIMENTO
+# ----------------------------
 modo_dev = False
 
 def painel_testes():
@@ -17,7 +24,11 @@ def painel_testes():
 
 if modo_dev:
     painel_testes()
-    tabs = st.tabs([
+
+# ----------------------------
+# ESTRUTURA DAS ABAS (FORA DO IF)
+# ----------------------------
+tabs = st.tabs([
     "📊 Mercado",
     "🎯 Sinais",
     "📝 Registo",
@@ -25,39 +36,13 @@ if modo_dev:
     "📉 Charts",
     "⚙️ Sistema"
 ])
-    @st.cache_data
+
+# ----------------------------
+# MÓDULO 2 — MODELO (Poisson, EV, Score)
+# ----------------------------
+@st.cache_data
 def poisson_prob(lmbda, goals):
     return (lmbda**goals * np.exp(-lmbda)) / np.math.factorial(goals)
-
-def prob_1x2(avg_A, avg_B):
-    max_goals = 10
-    probs = np.zeros(3)
-
-    for gA in range(max_goals):
-        for gB in range(max_goals):
-            pA = poisson_prob(avg_A, gA)
-            pB = poisson_prob(avg_B, gB)
-            if gA > gB:
-                probs[0] += pA * pB
-            elif gA == gB:
-                probs[1] += pA * pB
-            else:
-                probs[2] += pA * pB
-
-    return probs  # [1, X, 2]
-
-def calcular_ev(prob, odd):
-    return prob * odd - 1
-
-def score_hibrido(ev, edge, prob, conf, vol):
-    return (
-        ev * 40 +
-        edge * 20 +
-        prob * 15 +
-        conf * 15 -
-        vol * 10
-    )
-    def processar_jogos(df):
     resultados = []
 
     for _, row in df.iterrows():
